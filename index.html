@@ -161,5 +161,44 @@ $('loadDoc').onclick=()=>openList().catch(()=>toast('저장 목록을 불러오�
 ensureGuide();lastSnapshot=snap();editor.dispatchEvent(new Event('input'));
 })();
 </script>
+<script>
+(function(){
+  // 색상 선택창 옆에 HEX 코드(#RRGGBB, #RGB)를 직접 입력하는 칸을 추가합니다.
+  var HEX = /^#?([0-9a-f]{6}|[0-9a-f]{3})$/i;
+  document.querySelectorAll('input[type=color]').forEach(function(c){
+    var t = document.createElement('input');
+    t.type = 'text';
+    t.maxLength = 7;
+    t.placeholder = '#RRGGBB';
+    t.title = '색상 코드 직접 입력 (예: #0084D6)';
+    t.setAttribute('aria-label', (c.id || '색상') + ' 색상 코드');
+    t.value = c.value.toUpperCase();
+    t.style.cssText = 'width:86px;font:inherit;font-size:12px;padding:4px 6px;border:1px solid #d5d9e3;border-radius:6px;margin-left:4px';
+    c.insertAdjacentElement('afterend', t);
+
+    // 색상 선택창을 바꾸면 코드 칸도 갱신
+    c.addEventListener('input', function(){ t.value = c.value.toUpperCase(); });
+
+    // 코드 칸에 유효한 HEX를 입력하면 색상 선택창에 반영하고 기존 이벤트를 실행
+    function apply(){
+      var v = t.value.trim();
+      if (!HEX.test(v)) return;
+      v = v.charAt(0) === '#' ? v : '#' + v;
+      if (v.length === 4) v = '#' + v[1] + v[1] + v[2] + v[2] + v[3] + v[3];
+      v = v.toLowerCase();
+      if (c.value.toLowerCase() === v) return;
+      c.value = v;
+      c.dispatchEvent(new Event('input', { bubbles: true }));
+      c.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    t.addEventListener('input', apply);
+    t.addEventListener('change', function(){
+      if (!HEX.test(t.value.trim())) { t.value = c.value.toUpperCase(); return; }
+      apply();
+      t.value = c.value.toUpperCase();
+    });
+  });
+})();
+</script>
 </body>
 </html>
