@@ -41,6 +41,39 @@
 </div>
 <div class="note"><b>기본 디자인 적용:</b> 첨부 코드의 라벤더 포인트(#A98DD6), 프로필 표, 목차, H2/H3 문단 제목, 인용·각주 팝업·스포일러 박스의 시각적 규칙을 문서 루트 안에 한정해 재현했습니다. 원본의 body/티스토리 스킨 전체를 변경하던 선택자는 다른 게시판에 영향이 없도록 제외했습니다.</div>
 </main>
+<script>
+(function(){
+'use strict';
+/* 스포일러 주의 박스·인용문 등 블록 안의 끝에서 Enter를 누르면 블록 밖의 새 문단으로 나갑니다.
+   블록 안에서 줄을 바꾸려면 Shift+Enter를 사용하세요. */
+const editor=document.getElementById('editor');
+const BOX='.spoiler-warning,.quote,blockquote,.relation-title,.ending-condition';
+editor.addEventListener('keydown',function(e){
+  if(e.key!=='Enter'||e.shiftKey||e.isComposing) return;
+  const s=getSelection();
+  if(!s||!s.rangeCount||!s.isCollapsed) return;
+  let n=s.anchorNode;
+  if(n.nodeType===3) n=n.parentElement;
+  const box=n&&n.closest?n.closest(BOX):null;
+  if(!box||!editor.contains(box)) return;
+  const r=s.getRangeAt(0);
+  const tail=document.createRange();
+  tail.selectNodeContents(box);
+  tail.setStart(r.endContainer,r.endOffset);
+  if(tail.toString().trim()!=='') return;
+  e.preventDefault();
+  const p=document.createElement('p');
+  p.innerHTML='<br>';
+  box.after(p);
+  const nr=document.createRange();
+  nr.setStart(p,0);
+  nr.collapse(true);
+  s.removeAllRanges();
+  s.addRange(nr);
+  editor.dispatchEvent(new Event('input',{bubbles:true}));
+},true);
+})();
+</script>
 <div class="modal-backdrop" id="imageModal"><div class="modal" style="width:min(560px,100%)"><div class="modal-head">이미지 삽입 <button id="closeImage" aria-label="닫기">×</button></div><div class="modal-body"><label style="display:block;margin:0 0 10px">이미지 주소 또는 프록시 주소 <input id="imageUrl" type="url" placeholder="https://... (X·나무위키 이미지 주소도 가능)" style="display:block;width:100%;padding:10px;margin-top:5px;border:1px solid #d7dae3;border-radius:6px"></label><label style="display:block;margin:10px 0;padding:10px;border:1px dashed #c9ceda;border-radius:7px">또는 이미지 파일 선택 <input id="imageFile" type="file" accept="image/*" style="display:block;margin-top:7px;max-width:100%"><small style="display:block;margin-top:5px;color:#777">파일은 브라우저에서 Base64로 바꿉니다. 단, 티스토리 편집기가 data: 이미지 주소를 제거할 수 있으므로 외부 이미지에는 프록시 또는 티스토리 업로드를 권장합니다.</small></label><div id="imageSample" style="min-height:30px;margin:8px 0;color:#777;font-size:12px"></div><label style="display:block;margin:10px 0">이미지 설명(대체 텍스트) <input id="imageAlt" placeholder="예: 문서 대표 이미지" style="display:block;width:100%;padding:9px;margin-top:5px;border:1px solid #d7dae3;border-radius:6px"></label><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0"><button id="resolveImage" type="button">웹페이지 대표 이미지 찾기</button><button id="proxyImage" type="button">외부 이미지 사용 안내</button><span style="font-size:12px;color:#666">X·나무위키 등에서 외부 표시가 막히면 프록시 주소로 시험해 보세요.</span></div><div style="display:flex;flex-wrap:wrap;gap:10px"><label>너비 <input id="imageWidth" value="100%" placeholder="예: 400px 또는 80%" style="width:150px;padding:8px;border:1px solid #d7dae3;border-radius:6px"></label><label>정렬 <select id="imageAlign" style="padding:8px;border:1px solid #d7dae3;border-radius:6px"><option value="center">가운데</option><option value="left">왼쪽</option><option value="right">오른쪽</option></select></label></div><label style="display:block;margin-top:10px">이미지 클릭 시 이동할 링크(선택) <input id="imageLink" type="url" placeholder="https://..." style="display:block;width:100%;padding:9px;margin-top:5px;border:1px solid #d7dae3;border-radius:6px"></label><p style="font-size:12px;color:#666">티스토리에 올린 이미지는 글쓰기에서 먼저 업로드한 뒤 이미지 주소를 붙여넣으세요. 웹페이지 주소가 아닌 이미지 파일의 직접 URL이어야 미리보기가 표시됩니다.</p></div><div class="modal-actions"><button id="cancelImage">취소</button><button id="insertImage" class="primary">본문에 삽입</button></div></div></div><div class="modal-backdrop" id="codeModal"><div class="modal"><div class="modal-head">생성된 티스토리 HTML <button id="closeModal" aria-label="닫기">×</button></div><div class="modal-body"><p style="margin-top:0;font-size:13px;color:#555">게시글 본문에 붙여넣는 코드입니다. 각주 팝업 기능용 공통 JavaScript는 아래 별도 탭에서 복사해 스킨에 한 번 설치하세요.</p><div class="modebar"><button class="active" data-tab="post">게시글 HTML</button><button data-tab="skin">스킨 공통 JS</button></div><textarea id="codeOutput" spellcheck="false"></textarea></div><div class="modal-actions"><button id="copyCode" class="primary">현재 코드 복사</button><button id="downloadHtml">HTML 파일 다운로드</button><button id="closeModal2">닫기</button></div></div></div><div id="toast" class="toast"></div>
 <script>
 (function(){
