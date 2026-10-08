@@ -218,7 +218,7 @@ const KEY='wikiScrollSync';
 let syncOn=true;try{syncOn=localStorage.getItem(KEY)!=='off'}catch(_){}
 let ignoreUntil=0,lastIdx=-1,caretT=0,scrollT=0;
 const style=document.createElement('style');
-style.textContent='@media(min-width:851px){.workspace{align-items:start}.workspace>.panel:first-child{position:sticky;top:130px;max-height:calc(100vh - 140px);display:flex;flex-direction:column}.workspace>.panel:first-child .edit-area{flex:1 1 auto;min-height:0!important}}';
+style.textContent='@media(min-width:851px){.workspace{align-items:start}.workspace>.panel:first-child{position:sticky;top:180px;max-height:calc(100vh - 190px);display:flex;flex-direction:column}.workspace>.panel:first-child .edit-area{flex:1 1 auto;min-height:0!important}}';
 document.head.appendChild(style);
 const btn=document.createElement('button');
 btn.id='syncToggle';
@@ -255,10 +255,12 @@ function target(){const b=lastBlock&&editor.contains(lastBlock)?lastBlock:null;i
 function moveBlock(dir){const b=target();if(!b)return;if(dir<0){let p=b.previousElementSibling;while(p&&p.classList.contains('footnote-definition'))p=p.previousElementSibling;if(!p){say('이미 맨 위입니다.');return}editor.insertBefore(b,p)}else{let n=b.nextElementSibling;while(n&&n.classList.contains('footnote-definition'))n=n.nextElementSibling;if(!n){say('이미 맨 아래입니다.');return}n.after(b)}changed();lastBlock=b;say('요소를 한 칸 옮겼습니다.')}
 function blockLabel(b){if(b.tagName==='HR')return '구분선';if(b.classList.contains('quote')||b.tagName==='BLOCKQUOTE')return '인용문';if(b.tagName==='TABLE')return '표';if(b.tagName==='UL'||b.tagName==='OL')return '목록';if(/^H[2-5]$/.test(b.tagName))return '문단 제목';if(b.classList.contains('spoiler-warning'))return '스포일러 박스';return '문단'}
 function deleteBlock(){const b=target();if(!b)return;const label=blockLabel(b);if(!confirm('이 '+label+'을(를) 삭제할까요?'))return;const next=b.nextElementSibling||b.previousElementSibling;b.remove();lastBlock=next&&editor.contains(next)?next:null;changed();say(label+'을(를) 삭제했습니다.')}
-const bar=document.createElement('div');bar.className='toolbar';bar.setAttribute('aria-label','요소 편집 도구');bar.style.cssText='border-radius:0;border-top:0;position:relative;top:auto;display:flex;flex-wrap:wrap;gap:7px;align-items:center';
-bar.innerHTML='<span style="font-size:12px;color:#53586a;font-weight:700">요소 편집</span><button id="blockUp" type="button" title="선택한 요소를 한 칸 위로">↑ 위로</button><button id="blockDown" type="button" title="선택한 요소를 한 칸 아래로">↓ 아래로</button><button id="blockDelete" type="button" title="선택한 요소 삭제">요소 삭제</button><span style="font-size:12px;color:#74798a">인용문, 구분선, 목록, 표 등을 클릭한 뒤 사용하세요. 인용문 버튼을 다시 누르면 일반 문단으로 바뀝니다.</span>';
-const firstBar=document.querySelector('.toolbar');firstBar.parentNode.insertBefore(bar,firstBar.nextSibling);
+const bar=document.createElement('div');bar.setAttribute('aria-label','요소 편집 도구');bar.style.cssText='display:flex;flex-wrap:wrap;gap:7px;align-items:center;width:100%;padding-top:8px;margin-top:8px;border-top:1px solid #e6e8ee';
+bar.innerHTML='<span style="font-size:12px;color:#53586a;font-weight:700">요소 편집</span><button id="blockUp" type="button" title="선택한 요소를 한 칸 위로">↑ 위로</button><button id="blockDown" type="button" title="선택한 요소를 한 칸 아래로">↓ 아래로</button><button id="blockDelete" type="button" title="선택한 요소 삭제">요소 삭제</button><button id="warnBox" type="button" title="커서 아래에 스포일러 주의 박스를 넣습니다">스포일러 주의 박스</button><span style="font-size:12px;color:#74798a">인용문, 구분선, 목록, 표 등을 클릭한 뒤 사용하세요. 인용문 버튼을 다시 누르면 일반 문단으로 바뀝니다.</span>';
+const firstBar=document.querySelector('.toolbar');firstBar.appendChild(bar);
 $('blockUp').onclick=()=>moveBlock(-1);$('blockDown').onclick=()=>moveBlock(1);$('blockDelete').onclick=deleteBlock;
+function insertWarnBox(){const box=document.createElement('div');box.className='spoiler-warning';box.innerHTML='<div class="spoiler-title">스포일러</div><div class="spoiler-text">이 문서에는 작품의 <b>핵심 스포일러</b>가 포함되어 있습니다. <br>작품을 감상하지 않은 경우 열람에 주의해 주세요.</div>';const ref=lastBlock&&editor.contains(lastBlock)?lastBlock:null;if(ref)ref.after(box);else editor.appendChild(box);lastBlock=box;changed();say('스포일러 주의 박스를 추가했습니다.')}
+$('warnBox').onclick=insertWarnBox;
 const origQuote=$('quoteBtn').onclick;
 $('quoteBtn').onclick=function(){const s=getSelection();let n=s&&s.anchorNode;if(n&&n.nodeType===3)n=n.parentElement;const q=n&&n.closest?n.closest('blockquote,.quote'):null;if(q&&editor.contains(q)){const p=document.createElement('p');while(q.firstChild)p.appendChild(q.firstChild);q.replaceWith(p);const r=document.createRange();r.selectNodeContents(p);r.collapse(false);s.removeAllRanges();s.addRange(r);lastBlock=p;changed();say('인용문을 일반 문단으로 바꿨습니다.');return}origQuote&&origQuote.call(this)};
 })();
