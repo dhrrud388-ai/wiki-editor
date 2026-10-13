@@ -298,5 +298,171 @@ const origQuote=$('quoteBtn').onclick;
 $('quoteBtn').onclick=function(){const s=getSelection();let n=s&&s.anchorNode;if(n&&n.nodeType===3)n=n.parentElement;const q=n&&n.closest?n.closest('blockquote,.quote'):null;if(q&&editor.contains(q)){const p=document.createElement('p');while(q.firstChild)p.appendChild(q.firstChild);q.replaceWith(p);const r=document.createRange();r.selectNodeContents(p);r.collapse(false);s.removeAllRanges();s.addRange(r);lastBlock=p;changed();say('인용문을 일반 문단으로 바꿨습니다.');return}origQuote&&origQuote.call(this)};
 })();
 </script>
+   <!-- ▼ 각주 편집·삭제·관리 기능 (기존 마지막 </script> 뒤, </body> 바로 앞에 붙여넣으세요) ▼ -->
+<script>
+(function(){
+'use strict';
+const $=id=>document.getElementById(id);
+const editor=$('editor');
+if(!editor)return;
+
+/* ---------- 스타일 (편집기 화면 전용, 생성 HTML에는 포함되지 않음) ---------- */
+const st=document.createElement('style');
+st.textContent=
+'#editor a.footnote-btn{color:#7659a8;font-weight:700;text-decoration:none;cursor:pointer}'+
+'#editor a.footnote-btn:hover{background:#efe8fa;border-radius:3px}'+
+'#fnPopover{display:none;position:fixed;z-index:25;width:min(320px,calc(100vw - 16px));background:#fff;border:1px solid #7659a8;border-radius:8px;box-shadow:0 6px 24px #0003;padding:10px 12px;font-size:13px}'+
+'#fnPopover .fnp-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;color:#7659a8}'+
+'#fnPopover .fnp-x{border:0;background:none;font-size:18px;cursor:pointer;line-height:1;color:#666}'+
+'#fnPopover .fnp-text{max-height:130px;overflow:auto;white-space:pre-wrap;line-height:1.55;color:#25283a;word-break:break-word}'+
+'#fnPopover .fnp-actions{display:flex;gap:6px;margin-top:9px;justify-content:flex-end}'+
+'#fnPopover .fnp-actions button,.fn-row button{font:inherit;font-size:12px;border:1px solid #d5d9e3;background:#fff;border-radius:6px;padding:5px 9px;cursor:pointer}'+
+'#fnPopover .fnp-actions button:hover,.fn-row button:hover{background:#f1edfa;border-color:#a98dd6}'+
+'#fnPopover .fnp-actions [data-a=del],.fn-row [data-a=del],#fnEditDelete{color:#b3261e}'+
+'.fn-row{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid #e3e6ee;border-radius:8px;margin-bottom:8px}'+
+'.fn-row .fn-no{flex:none;min-width:34px;font-weight:700;color:#7659a8}'+
+'.fn-row .fn-main{flex:1;min-width:0}.fn-row .fn-ctx{font-size:11px;color:#8a8fa0;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'+
+'.fn-row .fn-txt{font-size:13px;line-height:1.5;white-space:pre-wrap;word-break:break-word;max-height:4.5em;overflow:hidden}'+
+'.fn-row .fn-btns{flex:none;display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end}';
+document.head.appendChild(st);
+
+/* ---------- 공통 도우미 ---------- */
+const stash=new Map(); // 마커가 사라진 각주 정의를 임시 보관 (실행 취소 시 복원)
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function say(m){const t=$('toast');if(!t)return;t.textContent=m;t.classList.add('show');clearTimeout(t._fn);t._fn=setTimeout(()=>t.classList.remove('show'),2200)}
+function changed(){editor.dispatchEvent(new Event('input',{bubbles:true}))}
+const mid=a=>a.dataset.footnote||(a.getAttribute('href')||'').replace(/^#/,'');
+const markers=()=>[...editor.querySelectorAll('a.footnote-btn')];
+const defs=()=>[...editor.querySelectorAll('.footnote-definition')];
+const defById=id=>defs().find(d=>d.id===id)||null;
+function orderedIds(){const seen=new Set(),out=[];markers().forEach(a=>{const id=mid(a);if(id&&!seen.has(id)){seen.add(id);out.push(id)}});return out}
+const numOf=id=>orderedIds().indexOf(id)+1;
+function defText(d){const c=d.cloneNode(true);if(c.firstElementChild&&c.firstElementChild.tagName==='B')c.firstElementChild.remove();c.querySelectorAll('br').forEach(br=>br.replaceWith('\n'));return c.textContent.replace(/^\s+/,'').replace(/\s+$/,'')}
+function setDef(id,text){let d=defById(id);if(!d){d=document.createElement('div');d.className='footnote-definition';d.id=id;editor.appendChild(d)}d.innerHTML='<b>[각주]</b> '+esc(text).replace(/\n/g,'<br>')}
+function ctxOf(a){try{const blk=a.closest('p,li,td,th,h2,h3,h4,h5,blockquote,.quote')||editor;const r=document.createRange();r.selectNodeContents(blk);r.setEndBefore(a);const t=r.toString().replace(/\s+/g,' ').trim();return t.length>26?'…'+t.slice(-26):t}catch(_){return ''}}
+
+/* ---------- 마커·정의 동기화: 고아 정의 정리, 삭제 복원, 본문 순서대로 번호 정렬 ---------- */
+function sync(){
+  let ch=false;const ids=orderedIds(),set=new Set(ids);
+  ids.forEach(id=>{if(!defById(id)&&stash.has(id)){editor.appendChild(stash.get(id));stash.delete(id);ch=true}});
+  const seen=new Set();
+  defs().forEach(d=>{
+    if(!set.has(d.id)){stash.set(d.id,d);d.remove();ch=true}
+    else if(seen.has(d.id)){d.remove();ch=true}
+    else seen.add(d.id)
+  });
+  const want=ids.map(defById).filter(Boolean),have=defs();
+  if(want.length!==have.length||want.some((d,i)=>d!==have[i])){want.forEach(d=>editor.appendChild(d));ch=true}
+  return ch;
+}
+let syncT;
+editor.addEventListener('input',()=>{
+  clearTimeout(syncT);
+  syncT=setTimeout(()=>{if(sync())changed();refreshManager();if(popId&&!markers().some(a=>mid(a)===popId))hidePop()},250);
+});
+const fnBtn=$('footnoteBtn');
+if(fnBtn)fnBtn.addEventListener('click',()=>setTimeout(()=>{if(sync())changed();refreshManager()},60));
+
+/* ---------- 각주 클릭 팝오버 ---------- */
+const pop=document.createElement('div');pop.id='fnPopover';pop.setAttribute('role','dialog');
+pop.innerHTML='<div class="fnp-head"><b class="fnp-num"></b><button type="button" class="fnp-x" aria-label="닫기">×</button></div><div class="fnp-text"></div><div class="fnp-actions"><button type="button" data-a="edit">편집</button><button type="button" data-a="del">삭제</button></div>';
+document.body.appendChild(pop);
+let popId=null;
+function hidePop(){pop.style.display='none';popId=null}
+function showPop(a){
+  const id=mid(a),d=defById(id);popId=id;
+  pop.querySelector('.fnp-num').textContent='각주 ['+numOf(id)+']';
+  const tx=pop.querySelector('.fnp-text'),t=d?defText(d):'';
+  tx.textContent=t||'(내용이 없습니다. 편집을 눌러 입력하세요.)';tx.style.color=t?'':'#a33';
+  pop.style.display='block';
+  const rc=a.getBoundingClientRect(),pw=pop.offsetWidth,ph=pop.offsetHeight;
+  let left=Math.min(Math.max(8,rc.left),innerWidth-pw-8),top=rc.bottom+6;
+  if(top+ph>innerHeight-8)top=rc.top-ph-6;
+  pop.style.left=left+'px';pop.style.top=Math.max(8,top)+'px';
+}
+pop.querySelector('.fnp-x').onclick=hidePop;
+pop.addEventListener('click',e=>{const b=e.target.closest('[data-a]');if(!b||!popId)return;const id=popId;hidePop();if(b.dataset.a==='edit')openEdit(id);else removeFootnote(id)});
+editor.addEventListener('click',e=>{const a=e.target.closest&&e.target.closest('a.footnote-btn');if(!a||!editor.contains(a))return;e.preventDefault();showPop(a)},true);
+editor.addEventListener('dblclick',e=>{const a=e.target.closest&&e.target.closest('a.footnote-btn');if(!a||!editor.contains(a))return;e.preventDefault();hidePop();openEdit(mid(a))});
+document.addEventListener('mousedown',e=>{if(pop.style.display==='block'&&!pop.contains(e.target)&&!(e.target.closest&&e.target.closest('a.footnote-btn')))hidePop()});
+window.addEventListener('scroll',e=>{if(pop.style.display==='block'&&!pop.contains(e.target))hidePop()},true);
+window.addEventListener('resize',hidePop);
+
+/* ---------- 각주 편집 모달 ---------- */
+const em=document.createElement('div');em.className='modal-backdrop';em.id='fnEditModal';
+em.innerHTML='<div class="modal" style="width:min(560px,100%)"><div class="modal-head"><span id="fnEditTitle">각주 편집</span><button type="button" id="fnEditClose" aria-label="닫기">×</button></div><div class="modal-body"><textarea id="fnEditText" placeholder="각주 내용을 입력하세요." style="height:170px;font:14px/1.6 system-ui,-apple-system,\'Noto Sans KR\',sans-serif"></textarea><div style="font-size:12px;color:#777;margin-top:6px">Ctrl+Enter로 저장 · 줄바꿈은 Enter · 실행 취소(Ctrl+Z)로 삭제를 되돌릴 수 있습니다.</div></div><div class="modal-actions"><button type="button" id="fnEditDelete" style="margin-right:auto">각주 삭제</button><button type="button" id="fnEditCancel">취소</button><button type="button" id="fnEditSave" class="primary">저장</button></div></div>';
+document.body.appendChild(em);
+let editId=null;
+const ta=em.querySelector('#fnEditText');
+function closeEdit(){em.classList.remove('open');editId=null}
+function openEdit(id){
+  const d=defById(id);editId=id;
+  em.querySelector('#fnEditTitle').textContent='각주 ['+numOf(id)+'] 편집';
+  ta.value=d?defText(d):'';
+  em.classList.add('open');ta.focus();ta.setSelectionRange(ta.value.length,ta.value.length);
+}
+function saveEdit(){
+  if(!editId)return;const text=ta.value.replace(/\s+$/,'');
+  if(!text.trim()){say('각주 내용을 입력하세요. 지우려면 “각주 삭제”를 사용하세요.');return}
+  setDef(editId,text);closeEdit();changed();refreshManager();say('각주를 수정했습니다.');
+}
+em.querySelector('#fnEditSave').onclick=saveEdit;
+em.querySelector('#fnEditCancel').onclick=em.querySelector('#fnEditClose').onclick=closeEdit;
+em.querySelector('#fnEditDelete').onclick=()=>{const id=editId;closeEdit();if(id)removeFootnote(id)};
+em.addEventListener('mousedown',e=>{if(e.target===em)closeEdit()});
+ta.addEventListener('keydown',e=>{if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){e.preventDefault();saveEdit()}else if(e.key==='Escape'){closeEdit()}});
+
+/* ---------- 삭제 (실행 취소 가능) ---------- */
+function removeFootnote(id){
+  const ms=markers().filter(a=>mid(a)===id);
+  if(!ms.length){const d=defById(id);if(d){stash.set(id,d);d.remove()}changed();refreshManager();return}
+  editor.focus();const s=getSelection();
+  ms.forEach(a=>{
+    if(!a.isConnected)return;
+    const r=document.createRange();r.selectNode(a);s.removeAllRanges();s.addRange(r);
+    try{document.execCommand('delete')}catch(_){}
+    if(a.isConnected)a.remove();
+  });
+  sync();changed();refreshManager();say('각주를 삭제했습니다. (Ctrl+Z로 되돌릴 수 있습니다)');
+}
+
+/* ---------- 각주 관리 목록 ---------- */
+const mm=document.createElement('div');mm.className='modal-backdrop';mm.id='fnManageModal';
+mm.innerHTML='<div class="modal" style="width:min(700px,100%)"><div class="modal-head"><span>각주 관리</span><button type="button" id="fnMgrClose" aria-label="닫기">×</button></div><div class="modal-body"><p style="margin:0 0 10px;font-size:12px;color:#666">번호는 본문에 나오는 순서대로 매겨지며 생성 HTML의 번호와 같습니다.</p><div id="fnMgrList"></div></div><div class="modal-actions"><button type="button" id="fnMgrDone">닫기</button></div></div>';
+document.body.insertBefore(mm,em);
+const closeMgr=()=>mm.classList.remove('open');
+mm.querySelector('#fnMgrClose').onclick=mm.querySelector('#fnMgrDone').onclick=closeMgr;
+mm.addEventListener('mousedown',e=>{if(e.target===mm)closeMgr()});
+function renderManager(){
+  const box=mm.querySelector('#fnMgrList');box.innerHTML='';
+  const ids=orderedIds();
+  if(!ids.length){box.innerHTML='<p style="color:#666">추가된 각주가 없습니다. 본문에 커서를 두고 툴바의 “각주” 버튼을 눌러 추가하세요.</p>';return}
+  ids.forEach((id,i)=>{
+    const a=markers().find(x=>mid(x)===id),d=defById(id),t=d?defText(d):'';
+    const row=document.createElement('div');row.className='fn-row';
+    const no=document.createElement('div');no.className='fn-no';no.textContent='['+(i+1)+']';
+    const main=document.createElement('div');main.className='fn-main';
+    const cx=document.createElement('div');cx.className='fn-ctx';cx.textContent=a?('위치: '+(ctxOf(a)||'(문단 시작)')):'';
+    const tx=document.createElement('div');tx.className='fn-txt';tx.textContent=t||'(내용 없음)';if(!t)tx.style.color='#a33';
+    main.append(cx,tx);
+    const bt=document.createElement('div');bt.className='fn-btns';
+    [['go','이동'],['edit','편집'],['del','삭제']].forEach(([k,l])=>{const b=document.createElement('button');b.type='button';b.dataset.a=k;b.textContent=l;b.onclick=()=>{if(k==='go')jumpTo(id);else if(k==='edit')openEdit(id);else{closeMgr();removeFootnote(id)}};bt.appendChild(b)});
+    row.append(no,main,bt);box.appendChild(row);
+  });
+}
+function refreshManager(){if(mm.classList.contains('open'))renderManager()}
+function openManager(){sync();renderManager();mm.classList.add('open')}
+function jumpTo(id){
+  const a=markers().find(x=>mid(x)===id);if(!a)return;
+  closeMgr();a.scrollIntoView({block:'center',behavior:'smooth'});editor.focus();
+  const r=document.createRange();r.selectNode(a);const s=getSelection();s.removeAllRanges();s.addRange(r);
+}
+if(fnBtn){const b=document.createElement('button');b.id='footnoteManageBtn';b.type='button';b.title='추가한 각주를 보고, 이동·편집·삭제합니다';b.textContent='각주 관리';fnBtn.after(b);b.onclick=openManager}
+
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){hidePop();if(mm.classList.contains('open')&&!em.classList.contains('open'))closeMgr()}});
+sync();
+})();
+</script>
+<!-- ▲ 각주 편집·삭제·관리 기능 끝 ▲ -->
 </body>
 </html>
